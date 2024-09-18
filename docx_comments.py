@@ -139,7 +139,7 @@ def process_comment(comment_id, parent_id, comment_data, comments_doc):
 
 
 if __name__ == "__main__":
-    filename = r"stuff to try out.docx"
+    filename = r"Document for Markup Testing-AJ.docx"
     output_workbook = "docx_comments_output.xlsx"
 
     docx_comments = get_document_comments(filename)
@@ -172,7 +172,16 @@ if __name__ == "__main__":
         else:
             sht = sheets[0]
 
-        sht.range(1, 1).value = ["ID", "Resolved?", "Reply?", "Reply To", "Author", "Date", "Doc Text", "Comment"]
+        sht.range(1, 1).value = [
+            "ID",
+            "Is Resolved?",
+            "Is a Reply?",
+            "Reply To",
+            "Author",
+            "Date",
+            "Doc Text",
+            "Comment",
+        ]
         for comment_id, comment_data in docx_comments.comments.items():
             process_comment(comment_id, comment_id, comment_data, docx_comments.comments_doc)
 
