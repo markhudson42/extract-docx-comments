@@ -55,6 +55,7 @@ def get_document_comments(docx_fileName):
         done = True if c.xpath("@w15:done", namespaces=ooXMLns)[0] == "1" else False
         comments_ex_dict[para_id] = {"is_reply": reply, "parent_id": parent_id, "resolved": done}
 
+    # read the comments themselves and their attributes, such as author, date and the paragraph ID
     for c in comments:
         comment = c.xpath("string(.)", namespaces=ooXMLns)
         comment_id = c.xpath("@w:id", namespaces=ooXMLns)[0]
@@ -69,8 +70,13 @@ def get_document_comments(docx_fileName):
             "date": comment_date,
             "comment": comment,
         }
+
+    # read the document data and extract the text between comment ranges
     for c in comment_doc_ranges:
         comments_of_id = c.xpath("@w:id", namespaces=ooXMLns)[0]
+        # a comment can span multiple paragraphs, so we find w:r tags that
+        # have a preceding commentRangeStart tag anywhere with the same ID
+        # and a following commentRangeEnd tag anywhere with the same ID
         parts = c.xpath(
             "//w:r[preceding::w:commentRangeStart[@w:id="
             + comments_of_id
@@ -119,8 +125,11 @@ def process_comment(comment_id, parent_id, comment_data, comments_doc):
         doc_text,
         comment_text,
     ]
+
+    # add the comment data to the workbook
     sht.range(number_processed + 1, 1).value = output_data
 
+    # process any replies to this top-level comment so they appear in the workbook in sequence
     if comment_id in parent_child_relationships:
         child_comments = parent_child_relationships[comment_id]
         if len(child_comments) != 0:
@@ -154,7 +163,7 @@ if __name__ == "__main__":
     comments_seen = []
     number_processed = 0
 
-    # TODO: create a spreadsheet with the comment data in
+    # create a spreadsheet with the comment data in
     with xw.App() as app:
         book = xw.Book()
         sheets = book.sheets
