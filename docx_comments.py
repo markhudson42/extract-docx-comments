@@ -29,16 +29,11 @@ def get_document_comments(docx_fileName):
     comments_file = docx_zip.read("word/comments.xml")
     comments_extended_file = docx_zip.read("word/commentsExtended.xml")
     document_file = docx_zip.read("word/document.xml")
-    with open("comments.xml", "wb") as f:
-        f.write(comments_file)
-    with open("comments_ex.xml", "wb") as f:
-        f.write(comments_extended_file)
-    with open("comments_of.xml", "wb") as f:
-        f.write(document_file)
 
     et_comments = ET.XML(comments_file)
     et_comments_ex = ET.XML(comments_extended_file)
     et_document = ET.XML(document_file)
+
     comments = et_comments.xpath("//w:comment", namespaces=ooXMLns)
     comments_ex = et_comments_ex.xpath("//w15:commentEx", namespaces=ooXMLns)
     comment_doc_ranges = et_document.xpath("//w:commentRangeStart", namespaces=ooXMLns)
