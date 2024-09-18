@@ -1,5 +1,18 @@
-from lxml import etree as ET
 import zipfile
+import xlwings as xw
+
+from lxml import etree as ET
+from dataclasses import dataclass
+
+
+@dataclass
+class DocxComments:
+    """Class for storing information about docx Word document comments."""
+
+    comments: dict
+    comments_ex: dict
+    comments_doc: dict
+
 
 # XML mnamespaces for the tags we want
 ooXMLns = {
@@ -9,22 +22,23 @@ ooXMLns = {
 }
 
 
-def get_document_comments(docxFileName):
-    docx_zip = zipfile.ZipFile(docxFileName)
+def get_document_comments(docx_fileName):
+    print(f"Reading data from: {docx_fileName}")
+    docx_zip = zipfile.ZipFile(docx_fileName)
 
-    comments_xml = docx_zip.read("word/comments.xml")
-    comments_extended_xml = docx_zip.read("word/commentsExtended.xml")
-    document_xml = docx_zip.read("word/document.xml")
+    comments_file = docx_zip.read("word/comments.xml")
+    comments_extended_file = docx_zip.read("word/commentsExtended.xml")
+    document_file = docx_zip.read("word/document.xml")
     with open("comments.xml", "wb") as f:
-        f.write(comments_xml)
+        f.write(comments_file)
     with open("comments_ex.xml", "wb") as f:
-        f.write(comments_extended_xml)
+        f.write(comments_extended_file)
     with open("comments_of.xml", "wb") as f:
-        f.write(document_xml)
+        f.write(document_file)
 
-    et_comments = ET.XML(comments_xml)
-    et_comments_ex = ET.XML(comments_extended_xml)
-    et_document = ET.XML(document_xml)
+    et_comments = ET.XML(comments_file)
+    et_comments_ex = ET.XML(comments_extended_file)
+    et_document = ET.XML(document_file)
     comments = et_comments.xpath("//w:comment", namespaces=ooXMLns)
     comments_ex = et_comments_ex.xpath("//w15:commentEx", namespaces=ooXMLns)
     comment_doc_ranges = et_document.xpath("//w:commentRangeStart", namespaces=ooXMLns)
@@ -32,7 +46,6 @@ def get_document_comments(docxFileName):
     comments_dict = {}
     comments_ex_dict = {}
     comments_doc_dict = {}
-    parent_child_para_ids = {}
 
     # get information about relationships between comments and whether they are resolved
     for c in comments_ex:
@@ -46,11 +59,6 @@ def get_document_comments(docxFileName):
             parent_id = None
         done = True if c.xpath("@w15:done", namespaces=ooXMLns)[0] == "1" else False
         comments_ex_dict[para_id] = {"is_reply": reply, "parent_id": parent_id, "resolved": done}
-        if parent_id is not None:
-            if parent_id in parent_child_para_ids:
-                parent_child_para_ids[parent_id].append(para_id)
-            else:
-                parent_child_para_ids[parent_id] = [para_id]
 
     for c in comments:
         comment = c.xpath("string(.)", namespaces=ooXMLns)
@@ -82,10 +90,95 @@ def get_document_comments(docxFileName):
             comment_of += part.xpath("string(.)", namespaces=ooXMLns) + "\n"
         comments_doc_dict[comments_of_id] = comment_of
 
-    return parent_child_para_ids, comments_dict, comments_ex_dict, comments_doc_dict
+    docx_comments = DocxComments(comments_dict, comments_ex_dict, comments_doc_dict)
+    return docx_comments
+
+
+def process_comment(comment_id, parent_id, comment_data, comments_doc):
+    global comments_seen
+    global parent_child_relationships
+    global number_processed
+    global sht
+
+    if comment_id in comments_seen:
+        return
+    comments_seen.append(comment_id)
+    number_processed += 1
+
+    comment_author = comment_data["author"]
+    comment_date = comment_data["date"]
+    comment_para_id = comment_data["para_id"]
+    is_reply = docx_comments.comments_ex[comment_para_id]["is_reply"]
+    resolved = docx_comments.comments_ex[comment_para_id]["resolved"]
+    reply_to = parent_id if is_reply else "n/a"
+    comment_text = comment_data["comment"]
+    doc_text = comments_doc[comment_id]
+
+    output_data = [
+        comment_id,
+        "Yes" if resolved else "No",
+        "Yes" if is_reply else "No",
+        reply_to,
+        comment_author,
+        comment_date,
+        doc_text,
+        comment_text,
+    ]
+    sht.range(number_processed + 1, 1).value = output_data
+
+    if comment_id in parent_child_relationships:
+        child_comments = parent_child_relationships[comment_id]
+        if len(child_comments) != 0:
+            for reply_id in child_comments:
+                comment_data = docx_comments.comments[reply_id]
+                process_comment(reply_id, comment_id, comment_data, comments_doc)
 
 
 if __name__ == "__main__":
-    filename = r"C:\Users\hudsonm0098\Downloads\stuff to try out.docx"
-    result = get_document_comments(filename)
+    filename = r"stuff to try out.docx"
+    output_workbook = "docx_comments_output.xlsx"
+
+    docx_comments = get_document_comments(filename)
+
+    # get the comment ID associated with each para ID
+    para_id_to_comment_id = {comment["para_id"]: id for id, comment in docx_comments.comments.items()}
+
+    # get the relationships between the parent and child comments
+    parent_child_relationships = {}
+    for comment_para_id, v in docx_comments.comments_ex.items():
+        if v["is_reply"]:
+            parent_para_id = v["parent_id"]
+            parent_comment_id = para_id_to_comment_id[parent_para_id]
+            child_comment_id = para_id_to_comment_id[comment_para_id]
+            if parent_comment_id not in parent_child_relationships:
+                parent_child_relationships[parent_comment_id] = [child_comment_id]
+            else:
+                parent_child_relationships[parent_comment_id].append(child_comment_id)
+
+    # list the details of the different comments, grouping replies with their parents
+    comments_seen = []
+    number_processed = 0
+
+    # TODO: create a spreadsheet with the comment data in
+    with xw.App() as app:
+        book = xw.Book()
+        sheets = book.sheets
+        if len(sheets) == 0:
+            sht = book.sheets.add("Sheet 1")
+        else:
+            sht = sheets[0]
+
+        sht.range(1, 1).value = ["ID", "Resolved?", "Reply?", "Reply To", "Author", "Date", "Doc Text", "Comment"]
+        for comment_id, comment_data in docx_comments.comments.items():
+            process_comment(comment_id, comment_id, comment_data, docx_comments.comments_doc)
+
+        sht.range(1, 6).column_width = 60
+        sht.range(1, 7).column_width = 60
+        sht.autofit(axis="columns")
+        sht.autofit(axis="rows")
+
+        # save the workbook
+        book.save(output_workbook)
+        book.close()
+
     dummy = 1
