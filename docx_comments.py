@@ -198,6 +198,7 @@ if __name__ == "__main__":
 
     # create a spreadsheet with the comment data in
     with xw.App(visible=True, add_book=False) as app:
+        app.screen_updating = False
         book = xw.Book()
         sheets = book.sheets
         if len(sheets) == 0:
@@ -218,10 +219,13 @@ if __name__ == "__main__":
         for comment_id, comment_data in docx_comments.comments.items():
             process_comment(comment_id, comment_id, comment_data, docx_comments.comments_doc)
 
-        sht.range(1, 6).column_width = 60
-        sht.range(1, 7).column_width = 60
         sht.autofit(axis="columns")
+        sht.range(1, 7).column_width = 65  # document text
+        sht.range(1, 8).column_width = 65  # comment text
         sht.autofit(axis="rows")
+
+        sht.range("A1:H1").api.Font.Bold = True
+        sht.used_range.api.WrapText = True
 
         # save the workbook
         book.save(output_workbook)
