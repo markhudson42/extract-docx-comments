@@ -22,6 +22,18 @@ ooXMLns = {
 }
 
 
+def get_author_and_date(comment, ns):
+    author_tmp = comment.xpath("@w:author", namespaces=ns)
+    initials_tmp = comment.xpath("@w:initials", namespaces=ns)
+    date_tmp = comment.xpath("@w:date", namespaces=ns)
+
+    comment_author = author_tmp[0] if len(author_tmp) > 0 else "MISSING"
+    comment_initials = initials_tmp[0] if len(initials_tmp) > 0 else "MISSING"
+    comment_date = date_tmp[0] if len(date_tmp) > 0 else "MISSING"
+
+    return (comment_author, comment_initials, comment_date)
+
+
 def get_document_comments(docx_fileName):
     print(f"Reading data from: {docx_fileName}")
     docx_zip = zipfile.ZipFile(docx_fileName)
@@ -29,6 +41,13 @@ def get_document_comments(docx_fileName):
     comments_file = docx_zip.read("word/comments.xml")
     comments_extended_file = docx_zip.read("word/commentsExtended.xml")
     document_file = docx_zip.read("word/document.xml")
+
+    with open("comments.xml", "wb") as f:
+        f.write(comments_file)
+    with open("comments_ex.xml", "wb") as f:
+        f.write(comments_extended_file)
+    with open("comments_doc.xml", "wb") as f:
+        f.write(document_file)
 
     et_comments = ET.XML(comments_file)
     et_comments_ex = ET.XML(comments_extended_file)
@@ -57,14 +76,12 @@ def get_document_comments(docx_fileName):
 
     # read the comments themselves and their attributes, such as author, date and the paragraph ID
     for c in comments:
-        comment = c.xpath("string(.)", namespaces=ooXMLns)
+        comment = c.xpath("string(.)", namespaces=ooXMLns).strip()
         comment_id = c.xpath("@w:id", namespaces=ooXMLns)[0]
-        comment_author = c.xpath("@w:author", namespaces=ooXMLns)[0]
-        comment_initials = c.xpath("@w:initials", namespaces=ooXMLns)[0]
-        comment_date = c.xpath("@w:date", namespaces=ooXMLns)[0]
-        comment_para_id = c.xpath("w:p/@w14:paraId", namespaces=ooXMLns)[0]
+        comment_para_ids = c.xpath("w:p/@w14:paraId", namespaces=ooXMLns)  # there can be more than one ID per comment
+        comment_author, comment_initials, comment_date = get_author_and_date(c, ooXMLns)
         comments_dict[comment_id] = {
-            "para_id": comment_para_id,
+            "para_ids": comment_para_ids,
             "author": comment_author,
             "initials": comment_initials,
             "date": comment_date,
@@ -73,23 +90,25 @@ def get_document_comments(docx_fileName):
 
     # read the document data and extract the text between comment ranges
     for c in comment_doc_ranges:
-        comments_of_id = c.xpath("@w:id", namespaces=ooXMLns)[0]
+        comment_doc_id = c.xpath("@w:id", namespaces=ooXMLns)[0]
         # a comment can span multiple paragraphs, so we find w:r tags that
-        # have a preceding commentRangeStart tag anywhere with the same ID
-        # and a following commentRangeEnd tag anywhere with the same ID
+        # have a preceding sibling commentRangeStart tag with the same ID
+        # as the comment - because the <w:r> is always after the commentRangeStart
+        # and is at the same nested level as that tag - and a following
+        # commentRangeEnd tag anywhere, not necessarily a sibling, with the same ID
         parts = c.xpath(
-            "//w:r[preceding::w:commentRangeStart[@w:id="
-            + comments_of_id
+            "//w:r[preceding-sibling::w:commentRangeStart[@w:id="
+            + comment_doc_id
             + "] and following::w:commentRangeEnd[@w:id="
-            + comments_of_id
+            + comment_doc_id
             + "]]",
             namespaces=ooXMLns,
         )
-        comment_of = ""
+        doc_text = ""
         for part in parts:
-            # assumes each part is a new paragraph, but can't cope with entirely blank lines
-            comment_of += part.xpath("string(.)", namespaces=ooXMLns) + "\n"
-        comments_doc_dict[comments_of_id] = comment_of
+            # TODO: need to be able to handle new paragraphs within the document text that is commented
+            doc_text += part.xpath("string(.)", namespaces=ooXMLns)
+        comments_doc_dict[comment_doc_id] = doc_text.strip()
 
     docx_comments = DocxComments(comments_dict, comments_ex_dict, comments_doc_dict)
     return docx_comments
@@ -108,9 +127,18 @@ def process_comment(comment_id, parent_id, comment_data, comments_doc):
 
     comment_author = comment_data["author"]
     comment_date = comment_data["date"]
-    comment_para_id = comment_data["para_id"]
-    is_reply = docx_comments.comments_ex[comment_para_id]["is_reply"]
-    resolved = docx_comments.comments_ex[comment_para_id]["resolved"]
+    comment_para_ids = comment_data["para_ids"]
+    is_reply = False
+    resolved = False
+    comment_ex_dict = docx_comments.comments_ex
+    for comment_para_id in comment_para_ids:
+        if comment_para_id not in comment_ex_dict:
+            continue
+        para_id_attribs = comment_ex_dict[comment_para_id]
+        if para_id_attribs["is_reply"]:
+            is_reply = True
+        if para_id_attribs["resolved"]:
+            resolved = True
     reply_to = parent_id if is_reply else "n/a"
     comment_text = comment_data["comment"]
     doc_text = comments_doc[comment_id]
@@ -139,13 +167,18 @@ def process_comment(comment_id, parent_id, comment_data, comments_doc):
 
 
 if __name__ == "__main__":
-    filename = r"Document for Markup Testing-AJ.docx"
+    # filename = r"Document for Markup Testing-AJ.docx"
+    filename = r"Zone Review.docx"
     output_workbook = "docx_comments_output.xlsx"
 
     docx_comments = get_document_comments(filename)
 
     # get the comment ID associated with each para ID
-    para_id_to_comment_id = {comment["para_id"]: id for id, comment in docx_comments.comments.items()}
+    para_id_to_comment_id = {
+        para_id: comment_id
+        for comment_id, comment_data in docx_comments.comments.items()
+        for para_id in comment_data["para_ids"]
+    }
 
     # get the relationships between the parent and child comments
     parent_child_relationships = {}
@@ -164,7 +197,7 @@ if __name__ == "__main__":
     number_processed = 0
 
     # create a spreadsheet with the comment data in
-    with xw.App() as app:
+    with xw.App(visible=True, add_book=False) as app:
         book = xw.Book()
         sheets = book.sheets
         if len(sheets) == 0:
