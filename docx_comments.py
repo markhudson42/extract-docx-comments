@@ -119,6 +119,7 @@ def process_comment(comment_id, parent_id, comment_data, comments_doc):
     global parent_child_relationships
     global number_processed
     global sht
+    global output_data
 
     if comment_id in comments_seen:
         return
@@ -143,19 +144,18 @@ def process_comment(comment_id, parent_id, comment_data, comments_doc):
     comment_text = comment_data["comment"]
     doc_text = comments_doc[comment_id]
 
-    output_data = [
-        comment_id,
-        "Yes" if resolved else "No",
-        "Yes" if is_reply else "No",
-        reply_to,
-        comment_author,
-        comment_date,
-        doc_text,
-        comment_text,
-    ]
-
-    # add the comment data to the workbook
-    sht.range(number_processed + 1, 1).value = output_data
+    output_data.append(
+        [
+            comment_id,
+            "Yes" if resolved else "No",
+            "Yes" if is_reply else "No",
+            reply_to,
+            comment_author,
+            comment_date,
+            doc_text,
+            comment_text,
+        ]
+    )
 
     # process any replies to this top-level comment so they appear in the workbook in sequence
     if comment_id in parent_child_relationships:
@@ -167,11 +167,13 @@ def process_comment(comment_id, parent_id, comment_data, comments_doc):
 
 
 if __name__ == "__main__":
-    # filename = r"Document for Markup Testing-AJ.docx"
-    filename = r"Zone Review.docx"
+    filename = r"Document for Markup Testing-AJ.docx"
+    # filename = r"Zone Review.docx"
     output_workbook = "docx_comments_output.xlsx"
 
     docx_comments = get_document_comments(filename)
+
+    print("Processing comments...")
 
     # get the comment ID associated with each para ID
     para_id_to_comment_id = {
@@ -197,6 +199,7 @@ if __name__ == "__main__":
     number_processed = 0
 
     # create a spreadsheet with the comment data in
+    print("Creating spreadsheet data...")
     with xw.App(visible=True, add_book=False) as app:
         app.screen_updating = False
         book = xw.Book()
@@ -206,19 +209,17 @@ if __name__ == "__main__":
         else:
             sht = sheets[0]
 
+        # fmt: off
         sht.range(1, 1).value = [
-            "ID",
-            "Is Resolved?",
-            "Is a Reply?",
-            "Reply To",
-            "Author",
-            "Date",
-            "Doc Text",
-            "Comment",
+            "ID", "Is Resolved?", "Is a Reply?", "Reply To", "Author", "Date", "Doc Text", "Comment"
         ]
+        # fmt:on
+
+        output_data = []
         for comment_id, comment_data in docx_comments.comments.items():
             process_comment(comment_id, comment_id, comment_data, docx_comments.comments_doc)
 
+        sht.range(2, 1).value = output_data
         sht.autofit(axis="columns")
         sht.range(1, 7).column_width = 65  # document text
         sht.range(1, 8).column_width = 65  # comment text
@@ -228,7 +229,8 @@ if __name__ == "__main__":
         sht.used_range.api.WrapText = True
 
         # save the workbook
+        print(f"Saving comment data to workbook: {output_workbook}...")
         book.save(output_workbook)
         book.close()
 
-    dummy = 1
+    print("Done!")
